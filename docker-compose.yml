@@ -1,0 +1,105 @@
+# ============================================================================
+# Umbra Relay Server — Docker Compose
+#
+# Single-relay deployment with optional federation and Discord bridge.
+# Federation peers are configured via RELAY_PEERS env var.
+#
+# Usage:
+#   docker compose up -d                          # Start relay only
+#   docker compose --profile bridge up -d         # Start relay + bridge bot
+#   docker compose logs -f                        # View logs
+#   docker compose down                           # Stop all services
+#
+# Configuration:
+#   Set environment variables in .env file, inline below, or pass at deploy time.
+#   Bridge requires DISCORD_BOT_TOKEN to be set.
+# ============================================================================
+
+version: '3.8'
+
+services:
+  relay:
+    build: .
+    ports:
+      - "${RELAY_PORT:-8080}:8080"
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - RELAY_PORT=8080
+      - RELAY_REGION=${RELAY_REGION:-US East}
+      - RELAY_LOCATION=${RELAY_LOCATION:-New York}
+      - RELAY_ID=${RELAY_ID:-}
+      - RELAY_PUBLIC_URL=${RELAY_PUBLIC_URL:-}
+      - RELAY_PEERS=${RELAY_PEERS:-}
+      - PRESENCE_HEARTBEAT_SECS=${PRESENCE_HEARTBEAT_SECS:-30}
+      - MAX_OFFLINE_MESSAGES=${MAX_OFFLINE_MESSAGES:-1000}
+      - OFFLINE_TTL_DAYS=${OFFLINE_TTL_DAYS:-7}
+      - SESSION_TTL_SECS=${SESSION_TTL_SECS:-3600}
+      - CLEANUP_INTERVAL_SECS=${CLEANUP_INTERVAL_SECS:-300}
+      # OAuth2 Discovery Configuration
+      - RELAY_BASE_URL=${RELAY_BASE_URL:-https://relay.umbra.chat}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - STEAM_API_KEY=${STEAM_API_KEY:-}
+      - BLUESKY_CLIENT_ID=${BLUESKY_CLIENT_ID:-}
+      - BLUESKY_CLIENT_SECRET=${BLUESKY_CLIENT_SECRET:-}
+      - XBOX_CLIENT_ID=${XBOX_CLIENT_ID:-}
+      - XBOX_CLIENT_SECRET=${XBOX_CLIENT_SECRET:-}
+      - DISCOVERY_SALT=${DISCOVERY_SALT:-}
+      # Discovery persistence
+      - DATA_DIR=/data
+    volumes:
+      - relay_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+
+  # ── Discord Bridge Bot ────────────────────────────────────────────────────
+  # Bidirectional Discord ↔ Umbra message bridge.
+  # Only starts when explicitly enabled: docker compose --profile bridge up -d
+  bridge:
+    build:
+      context: ./bridge-bot
+      dockerfile: Dockerfile
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - RELAY_URL=ws://relay:8080/ws
+      - RELAY_API_URL=http://relay:8080
+      - DATA_DIR=/data
+      - BRIDGE_DATA_DIR=/bridge-data
+      - LOG_LEVEL=${BRIDGE_LOG_LEVEL:-info}
+    volumes:
+      - relay_data:/data:ro
+      - bridge_data:/bridge-data
+    depends_on:
+      relay:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - bridge
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+        reservations:
+          memory: 32M
+          cpus: '0.05'
+
+volumes:
+  relay_data:
+  bridge_data:
